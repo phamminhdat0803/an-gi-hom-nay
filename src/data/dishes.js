@@ -1,0 +1,16 @@
+export const dishes = [
+  { id: 'pho-bo', name: 'Phở bò', emoji: '🍜', weight: 1.2, tone: '#6f2f18' },
+  { id: 'bun-cha', name: 'Bún chả', emoji: '🥩', weight: 1, tone: '#5c2614' },
+  { id: 'com-tam', name: 'Cơm tấm', emoji: '🍚', weight: 1.1, tone: '#7a4a1d' },
+  { id: 'banh-mi', name: 'Bánh mì', emoji: '🥖', weight: 1.2, tone: '#8a5a28' },
+  { id: 'bun-bo-hue', name: 'Bún bò Huế', emoji: '🌶️', weight: 1, tone: '#7a1f14' },
+  { id: 'banh-xeo', name: 'Bánh xèo', emoji: '🥞', weight: 1, tone: '#9a6b1c' },
+  { id: 'hu-tieu', name: 'Hủ tiếu', emoji: '🥣', weight: 0.9, tone: '#4d3420' },
+  { id: 'banh-cuon', name: 'Bánh cuốn', emoji: '🥟', weight: 0.9, tone: '#6a4e32' },
+  { id: 'goi-cuon', name: 'Gỏi cuốn', emoji: '🥗', weight: 0.8, tone: '#355c32' },
+  { id: 'bun-thit-nuong', name: 'Bún thịt nướng', emoji: '🥓', weight: 1, tone: '#6b2a16' },
+  { id: 'mi-quang', name: 'Mì Quảng', emoji: '🍤', weight: 0.9, tone: '#8b3d18' },
+  { id: 'com-ga', name: 'Cơm gà', emoji: '🍗', weight: 1, tone: '#7a3e12' },
+  { id: 'lau', name: 'Lẩu', emoji: '🍲', weight: 0.8, tone: '#5a2418' },
+  { id: 'bun-rieu', name: 'Bún riêu', emoji: '🦀', weight: 0.9, tone: '#7a2e24' },
+]

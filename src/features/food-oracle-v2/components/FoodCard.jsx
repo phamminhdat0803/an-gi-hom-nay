@@ -1,3 +1,7 @@
+import royalCrest from '../../../assets/card/royal-crest.png'
+import royalDivider from '../../../assets/card/royal-divider.png'
+import { RoyalCardShell } from './RoyalCardShell'
+
 function photoStyle(presentation) {
   const scale = presentation?.scale ?? 1
   const x = presentation?.x ?? 0
@@ -32,29 +36,50 @@ export function FoodCard({
         .join(' ')}
       onClick={hero ? undefined : onSelect}
     >
-      <div className="fo2-card-face">
-        <div
-          className={[
-            'fo2-card-photo',
-            dish?.id === 'goi-cuon' ? 'is-small-subject' : '',
-          ]
-            .filter(Boolean)
-            .join(' ')}
-        >
-          {dish?.image ? (
-            <img
-              src={dish.image}
-              alt={hero ? name : ''}
-              draggable="false"
-              style={photoStyle(dish.presentation)}
-            />
-          ) : null}
-        </div>
-        <div className="fo2-card-caption">
-          {winner ? <p className="fo2-card-kicker">Hôm nay ăn</p> : null}
+      <RoyalCardShell>
+        <div className="fo2-royal-content">
+          <img
+            className="fo2-royal-crest"
+            src={royalCrest}
+            alt=""
+            aria-hidden="true"
+            draggable="false"
+          />
+          <p className="fo2-card-kicker" aria-hidden="true">
+            Hôm nay ăn
+          </p>
           <p className="fo2-card-name">{name}</p>
+          <div
+            className={[
+              'fo2-card-photo',
+              dish?.id === 'goi-cuon' ? 'is-small-subject' : '',
+            ]
+              .filter(Boolean)
+              .join(' ')}
+          >
+            <div className="fo2-card-photo-stage">
+              {dish?.image ? (
+                <img
+                  src={dish.image}
+                  alt={hero ? name : ''}
+                  draggable="false"
+                  style={photoStyle(dish.presentation)}
+                />
+              ) : null}
+            </div>
+          </div>
+          <img
+            className="fo2-royal-divider"
+            src={royalDivider}
+            alt=""
+            aria-hidden="true"
+            draggable="false"
+          />
+          <p className="fo2-card-footer" aria-hidden="true">
+            Tinh hoa ẩm thực Việt
+          </p>
         </div>
-      </div>
+      </RoyalCardShell>
     </article>
   )
 }

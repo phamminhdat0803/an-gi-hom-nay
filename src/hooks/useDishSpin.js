@@ -1,10 +1,9 @@
 import {
   animate,
   useMotionValue,
-  useMotionValueEvent,
   useReducedMotion,
 } from 'motion/react'
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { dishes } from '../data/dishes'
 import {
   clockwiseTarget,
@@ -14,52 +13,118 @@ import {
   nearestFacing,
   pickWeighted,
   SPIN_EXTRA_TURNS,
-  stepDeg,
 } from '../lib/pickDish'
+
+const COMMIT_PX = DRAG_PX_PER_CARD * 0.38
+const FLICK_PX_PER_MS = 0.55
+const RUBBER_MAX_PX = 14
+const DRAG_DISTANCE = DRAG_PX_PER_CARD
+
+function clamp(n, min, max) {
+  return Math.min(max, Math.max(min, n))
+}
+
+function wrapIndex(index, count) {
+  return ((index % count) + count) % count
+}
+
+function neighborFromProgress(startIndex, visualProgress, count) {
+  if (visualProgress > 0) return wrapIndex(startIndex - 1, count)
+  if (visualProgress < 0) return wrapIndex(startIndex + 1, count)
+  return null
+}
+
+function rubberTranslation(rawDx) {
+  const extra = Math.abs(rawDx) - DRAG_DISTANCE
+  if (extra <= 0) return 0
+  return Math.sign(rawDx) * Math.min(extra * 0.08, RUBBER_MAX_PX)
+}
+
+function publishQa(payload) {
+  if (!import.meta.env.DEV) return
+  window.__fo2Drag = payload
+}
 
 export function useDishSpin() {
   const reduceMotion = useReducedMotion()
   const rotation = useMotionValue(0)
+  const visualProgress = useMotionValue(0)
+  const rubberX = useMotionValue(0)
+  const dragLive = useMotionValue(0)
   const [status, setStatus] = useState('idle')
   const [winner, setWinner] = useState(null)
-  const [frontIndex, setFrontIndex] = useState(0)
-  const [dragging, setDragging] = useState(false)
+  const [committedIndex, setCommittedIndexState] = useState(0)
+  const [dragPhase, setDragPhase] = useState('idle')
+  const [gestureStartIndex, setGestureStartIndex] = useState(0)
+  const [incomingIndex, setIncomingIndex] = useState(null)
   const [animating, setAnimating] = useState(false)
   const runIdRef = useRef(0)
   const controlsRef = useRef(null)
   const spinningRef = useRef(false)
+  const animatingRef = useRef(false)
+  const dragPhaseRef = useRef('idle')
+  const committedIndexRef = useRef(0)
+  const gestureStartIndexRef = useRef(0)
+  const incomingIndexRef = useRef(null)
   const dragRef = useRef({
-    active: false,
     startX: 0,
-    startRot: 0,
+    rawDx: 0,
     moved: 0,
+    lastX: 0,
+    lastT: 0,
+    vx: 0,
+    pointerId: null,
   })
   const wheelSnapRef = useRef(0)
+  const snapAnimRef = useRef(null)
 
-  useMotionValueEvent(rotation, 'change', (latest) => {
-    if (spinningRef.current || dragRef.current.active) return
-    const next = frontIndexFromRotation(latest, dishes.length)
-    setFrontIndex((prev) => (prev === next ? prev : next))
-  })
+  const commitIndex = useCallback((nextIndex) => {
+    const wrapped = wrapIndex(nextIndex, dishes.length)
+    committedIndexRef.current = wrapped
+    gestureStartIndexRef.current = wrapped
+    setCommittedIndexState(wrapped)
+    setGestureStartIndex(wrapped)
+    return wrapped
+  }, [])
+
+  const setPhase = (phase) => {
+    dragPhaseRef.current = phase
+    setDragPhase(phase)
+  }
 
   const stopControls = () => {
     controlsRef.current?.stop()
     controlsRef.current = null
   }
 
+  const stopSnap = () => {
+    snapAnimRef.current?.stop()
+    snapAnimRef.current = null
+  }
+
+  const clearDragMotion = useCallback(() => {
+    incomingIndexRef.current = null
+    setIncomingIndex(null)
+    dragRef.current.rawDx = 0
+    dragRef.current.moved = 0
+    dragRef.current.vx = 0
+    dragRef.current.pointerId = null
+  }, [])
+
   const snapToIndex = useCallback(
     (index) => {
       if (spinningRef.current) return
-      const count = dishes.length
-      const i = ((index % count) + count) % count
-      const target = nearestFacing(rotation.get(), i, count)
+      if (dragPhaseRef.current !== 'idle') return
+      const i = commitIndex(index)
+      const target = nearestFacing(rotation.get(), i, dishes.length)
       stopControls()
-      setFrontIndex(i)
       if (reduceMotion) {
         rotation.set(target)
+        animatingRef.current = false
         setAnimating(false)
         return
       }
+      animatingRef.current = true
       setAnimating(true)
       const anim = animate(rotation, target, {
         type: 'spring',
@@ -68,73 +133,209 @@ export function useDishSpin() {
         mass: 0.85,
       })
       controlsRef.current = anim
-      anim.then(() => setAnimating(false)).catch(() => setAnimating(false))
+      const finish = () => {
+        commitIndex(i)
+        animatingRef.current = false
+        setAnimating(false)
+      }
+      anim.then(finish).catch(finish)
     },
-    [reduceMotion, rotation],
+    [commitIndex, reduceMotion, rotation],
   )
 
   const snapToNearest = useCallback(() => {
-    const idx = frontIndexFromRotation(rotation.get(), dishes.length)
-    snapToIndex(idx)
+    if (dragPhaseRef.current !== 'idle') return
+    snapToIndex(frontIndexFromRotation(rotation.get(), dishes.length))
   }, [rotation, snapToIndex])
 
   const nudge = useCallback(
     (dir) => {
       if (spinningRef.current) return
-      const idx = frontIndexFromRotation(rotation.get(), dishes.length)
-      snapToIndex(idx + dir)
+      if (dragPhaseRef.current !== 'idle') return
+      snapToIndex(committedIndexRef.current + dir)
     },
-    [rotation, snapToIndex],
+    [snapToIndex],
   )
 
   const selectCard = useCallback(
     (index) => {
       if (spinningRef.current) return
+      if (dragPhaseRef.current !== 'idle') return
       if (dragRef.current.moved > 8) return
       snapToIndex(index)
     },
     [snapToIndex],
   )
 
+  const finishIdle = useCallback(() => {
+    clearDragMotion()
+    visualProgress.set(0)
+    rubberX.set(0)
+    dragLive.set(0)
+    setPhase('idle')
+    publishQa({
+      dragPhase: 'idle',
+      isDragging: false,
+      isSnapping: false,
+      visualProgress: 0,
+      rawDragX: 0,
+      incomingIndex: null,
+      committedIndex: committedIndexRef.current,
+      startIndex: gestureStartIndexRef.current,
+    })
+  }, [clearDragMotion, dragLive, rubberX, visualProgress])
+
+  useLayoutEffect(() => {
+    if (dragPhase !== 'idle') return
+    visualProgress.set(0)
+    rubberX.set(0)
+    dragLive.set(0)
+  }, [dragLive, dragPhase, rubberX, visualProgress])
+
+  const animateProgressTo = useCallback(
+    (target, onDone) => {
+      stopSnap()
+      rubberX.set(0)
+      if (reduceMotion || Math.abs(visualProgress.get() - target) < 0.001) {
+        visualProgress.set(target)
+        onDone()
+        return
+      }
+      const anim = animate(visualProgress, target, {
+        type: 'spring',
+        stiffness: 320,
+        damping: 34,
+        mass: 0.7,
+        restDelta: 0.001,
+        restSpeed: 0.01,
+      })
+      snapAnimRef.current = anim
+      const finish = () => {
+        visualProgress.set(target)
+        snapAnimRef.current = null
+        onDone()
+      }
+      anim.then(finish).catch(finish)
+    },
+    [reduceMotion, rubberX, visualProgress],
+  )
+
   const onPointerDown = useCallback(
     (event) => {
       if (spinningRef.current) return
+      if (dragPhaseRef.current !== 'idle') return
       if (event.pointerType === 'mouse' && event.button !== 0) return
       stopControls()
-      dragRef.current = {
-        active: true,
-        startX: event.clientX,
-        startRot: rotation.get(),
-        moved: 0,
+      stopSnap()
+      const startIndex = committedIndexRef.current
+      gestureStartIndexRef.current = startIndex
+      incomingIndexRef.current = null
+      if (import.meta.env.DEV && gestureStartIndexRef.current !== committedIndexRef.current) {
+        console.error('[fo2] gesture must start from committed index')
       }
-      setDragging(true)
+      dragRef.current = {
+        startX: event.clientX,
+        rawDx: 0,
+        moved: 0,
+        lastX: event.clientX,
+        lastT: event.timeStamp,
+        vx: 0,
+        pointerId: event.pointerId,
+      }
+      visualProgress.set(0)
+      rubberX.set(0)
+      dragLive.set(1)
+      setGestureStartIndex(startIndex)
+      setIncomingIndex(null)
+      setPhase('dragging')
+      publishQa({
+        dragPhase: 'dragging',
+        isDragging: true,
+        isSnapping: false,
+        visualProgress: 0,
+        rawDragX: 0,
+        incomingIndex: null,
+        committedIndex: startIndex,
+        startIndex,
+      })
     },
-    [rotation],
+    [dragLive, rubberX, visualProgress],
   )
 
   const onPointerMove = useCallback(
     (event) => {
+      if (dragLive.get() !== 1 || spinningRef.current) return
       const drag = dragRef.current
-      if (!drag.active || spinningRef.current) return
-      const dx = event.clientX - drag.startX
-      drag.moved = Math.max(drag.moved, Math.abs(dx))
-      const step = stepDeg(dishes.length)
-      rotation.set(drag.startRot + (dx / DRAG_PX_PER_CARD) * step)
+      const rawDx = event.clientX - drag.startX
+      const dt = event.timeStamp - drag.lastT
+      if (dt > 0) drag.vx = (event.clientX - drag.lastX) / dt
+      drag.lastX = event.clientX
+      drag.lastT = event.timeStamp
+      drag.rawDx = rawDx
+      drag.moved = Math.max(drag.moved, Math.abs(rawDx))
+
+      const progress = clamp(rawDx / DRAG_DISTANCE, -1, 1)
+      const incoming = neighborFromProgress(gestureStartIndexRef.current, progress, dishes.length)
+      visualProgress.set(progress)
+      rubberX.set(Math.abs(progress) >= 1 ? rubberTranslation(rawDx) : 0)
+
+      if (incoming !== incomingIndexRef.current) {
+        incomingIndexRef.current = incoming
+        setIncomingIndex(incoming)
+      }
+
+      if (import.meta.env.DEV) {
+        publishQa({
+          dragPhase: 'dragging',
+          isDragging: true,
+          isSnapping: false,
+          visualProgress: progress,
+          rawDragX: rawDx,
+          incomingIndex: incoming,
+          committedIndex: committedIndexRef.current,
+          startIndex: gestureStartIndexRef.current,
+        })
+      }
     },
-    [rotation],
+    [dragLive, rubberX, visualProgress],
   )
 
   const endDrag = useCallback(() => {
+    if (dragPhaseRef.current !== 'dragging') return
+
     const drag = dragRef.current
-    if (!drag.active) return
-    drag.active = false
-    setDragging(false)
-    if (drag.moved > 0) snapToNearest()
-  }, [snapToNearest])
+    const rawDx = drag.rawDx
+    const moved = drag.moved
+    const vx = drag.vx
+    const startIndex = gestureStartIndexRef.current
+
+    const flick = Math.abs(vx) >= FLICK_PX_PER_MS
+    const far = Math.abs(rawDx) >= COMMIT_PX
+    let dir = 0
+    if (moved > 0 && far) dir = rawDx > 0 ? -1 : 1
+    else if (moved > 0 && flick) dir = vx > 0 ? -1 : 1
+
+    if (dir === 0) {
+      setPhase('snap-back')
+      animateProgressTo(0, finishIdle)
+      return
+    }
+
+    const next = wrapIndex(startIndex + dir, dishes.length)
+    incomingIndexRef.current = next
+    setIncomingIndex(next)
+    rotation.set(facingRotation(next, dishes.length))
+    commitIndex(next)
+    visualProgress.set(0)
+    rubberX.set(0)
+    dragLive.set(0)
+    finishIdle()
+  }, [animateProgressTo, commitIndex, dragLive, finishIdle, rotation, rubberX, visualProgress])
 
   const onWheelDelta = useCallback(
     (delta) => {
       if (spinningRef.current) return
+      if (dragPhaseRef.current !== 'idle') return
       if (reduceMotion) {
         nudge(delta > 0 ? 1 : -1)
         return
@@ -151,6 +352,7 @@ export function useDishSpin() {
 
   const spin = useCallback(async () => {
     if (spinningRef.current) return
+    if (dragPhaseRef.current !== 'idle') return
     spinningRef.current = true
 
     const next = pickWeighted(dishes)
@@ -164,7 +366,7 @@ export function useDishSpin() {
     if (reduceMotion) {
       stopControls()
       rotation.set(facingRotation(winIndex, dishes.length))
-      setFrontIndex(winIndex)
+      commitIndex(winIndex)
       setWinner(next)
       setStatus('done')
       spinningRef.current = false
@@ -216,7 +418,7 @@ export function useDishSpin() {
 
       stopControls()
       rotation.set(target)
-      setFrontIndex(winIndex)
+      commitIndex(winIndex)
       setWinner(next)
       setStatus('done')
     } catch {
@@ -228,22 +430,36 @@ export function useDishSpin() {
         setAnimating(false)
       }
     }
-  }, [reduceMotion, rotation])
+  }, [commitIndex, reduceMotion, rotation])
 
   useEffect(() => {
+    const onBlur = () => {
+      if (dragPhaseRef.current === 'dragging') endDrag()
+    }
+    window.addEventListener('blur', onBlur)
     return () => {
+      window.removeEventListener('blur', onBlur)
       runIdRef.current += 1
       controlsRef.current?.stop()
+      stopSnap()
       window.clearTimeout(wheelSnapRef.current)
     }
-  }, [])
+  }, [endDrag])
+
+  const dragging = dragPhase !== 'idle'
 
   return {
     dishes,
     rotation,
+    visualProgress,
+    rubberX,
+    dragLive,
     status,
     winner,
-    frontIndex,
+    frontIndex: committedIndex,
+    dragPhase,
+    gestureStartIndex,
+    incomingIndex,
     spinning: status === 'spinning',
     dragging,
     settled: status !== 'spinning' && !dragging && !animating,

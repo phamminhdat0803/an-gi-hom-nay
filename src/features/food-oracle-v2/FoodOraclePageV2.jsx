@@ -12,12 +12,18 @@ export function FoodOraclePageV2() {
   const {
     dishes,
     rotation,
+    visualProgress,
+    rubberX,
+    dragLive,
     status,
     winner,
     frontIndex,
     spinning,
     dragging,
     settled,
+    dragPhase,
+    gestureStartIndex,
+    incomingIndex,
     spin,
     nudge,
     selectCard,
@@ -47,11 +53,17 @@ export function FoodOraclePageV2() {
         <FoodCarousel
           dishes={gallery}
           rotation={rotation}
+          visualProgress={visualProgress}
+          rubberX={rubberX}
+          dragLive={dragLive}
           spinning={spinning}
           frontIndex={frontIndex}
           winner={winner}
           dragging={dragging}
           settled={settled}
+          dragPhase={dragPhase}
+          gestureStartIndex={gestureStartIndex}
+          incomingIndex={incomingIndex}
           selectCard={selectCard}
           onPointerDown={onPointerDown}
           onPointerMove={onPointerMove}

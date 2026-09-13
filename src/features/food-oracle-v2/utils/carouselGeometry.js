@@ -60,6 +60,10 @@ export function getLayout({ isMobile, isTablet, isShort }) {
   return LAYOUTS.desktop
 }
 
+export function wrapIndex(index, count) {
+  return ((index % count) + count) % count
+}
+
 export function floatIndexFromRotation(rotation, count) {
   return -rotation / (360 / count)
 }
@@ -115,27 +119,144 @@ export function coverflowPose(offset, layout) {
   }
 }
 
-export function applyCardPose(el, rotation, conf) {
-  if (!el) return
-  const { index, count, layout, hideActive } = conf
-  const floatIndex = floatIndexFromRotation(rotation, count)
-  const offset = wrapOffset(index, floatIndex, count)
-  const pose = coverflowPose(offset, layout)
-  const isCenter = Math.abs(offset) < 0.42
+export function getCardPose(relativeOffset, layout) {
+  return coverflowPose(relativeOffset, layout)
+}
 
-  if (!pose.visible || (hideActive && isCenter)) {
+export function interpolatePose(from, to, t) {
+  const u = Math.min(1, Math.max(0, t))
+  return {
+    visible: true,
+    interactive: false,
+    x: lerp(from.x, to.x, u),
+    y: lerp(from.y, to.y, u),
+    z: lerp(from.z, to.z, u),
+    rotateY: lerp(from.rotateY, to.rotateY, u),
+    scale: lerp(from.scale, to.scale, u),
+    opacity: lerp(from.opacity, to.opacity, u),
+    brightness: lerp(from.brightness, to.brightness, u),
+    zIndex: Math.round(lerp(from.zIndex, to.zIndex, u)),
+  }
+}
+
+export function twoCardPoses(visualProgress, layout, rubberX = 0) {
+  const center = getCardPose(0, layout)
+  const p = Math.min(1, Math.abs(visualProgress))
+  if (p === 0 || visualProgress === 0) {
+    return {
+      p: 0,
+      sideSign: 0,
+      outgoing: { ...center, interactive: false },
+      incoming: null,
+    }
+  }
+
+  const sideSign = visualProgress > 0 ? 1 : -1
+  const outgoingSide = getCardPose(sideSign, layout)
+  const incomingSide = getCardPose(-sideSign, layout)
+  const outgoing = interpolatePose(center, outgoingSide, p)
+  const incoming = interpolatePose(incomingSide, center, p)
+  if (rubberX) {
+    outgoing.x += rubberX
+    incoming.x += rubberX
+  }
+  outgoing.interactive = false
+  incoming.interactive = false
+
+  if (p < 0.5) {
+    outgoing.zIndex = 80
+    incoming.zIndex = 40
+  } else {
+    outgoing.zIndex = outgoingSide.zIndex
+    incoming.zIndex = 200
+  }
+
+  return { p, sideSign, outgoing, incoming }
+}
+
+function distanceBucket(dist) {
+  if (dist > 1.55) return '2'
+  if (dist > 0.55) return '1'
+  return '0'
+}
+
+export function applyPoseStyle(el, pose, conf = {}) {
+  if (!el) return
+  const { hide = false, freezeChrome = false, dist = 1, interactive } = conf
+  if (hide || !pose || !pose.visible) {
     el.style.visibility = 'hidden'
     el.style.pointerEvents = 'none'
     el.style.opacity = '0'
     el.style.filter = 'none'
+    el.style.zIndex = '0'
     el.style.transform = 'translate3d(0,0,-480px) scale(0.9)'
+    el.dataset.fo2Scale = '0'
     return
   }
 
+  if (!freezeChrome) {
+    el.dataset.distance = distanceBucket(dist)
+  }
+
+  const canClick = interactive ?? pose.interactive
   el.style.visibility = 'visible'
-  el.style.pointerEvents = pose.interactive ? 'auto' : 'none'
+  el.style.pointerEvents = canClick ? 'auto' : 'none'
   el.style.opacity = String(pose.opacity)
   el.style.zIndex = String(pose.zIndex)
   el.style.filter = pose.brightness >= 0.98 ? 'none' : `brightness(${pose.brightness})`
   el.style.transform = `translate3d(${pose.x}px, ${pose.y}px, ${pose.z}px) rotateY(${pose.rotateY}deg) scale(${pose.scale})`
+  el.dataset.fo2Scale = String(pose.scale)
+}
+
+export function applyCardPose(el, rotation, conf) {
+  if (!el) return
+  const { index, count, layout, hideIndex, freezeChrome } = conf
+  const floatIndex = floatIndexFromRotation(rotation, count)
+  const offset = wrapOffset(index, floatIndex, count)
+  const pose = getCardPose(offset, layout)
+  applyPoseStyle(el, pose, {
+    hide: index === hideIndex,
+    freezeChrome,
+    dist: Math.abs(offset),
+  })
+}
+
+export function applyFrozenTrackCard(el, conf) {
+  if (!el) return
+  const { index, count, layout, startIndex, hideSet, visualProgress = 0 } = conf
+  const floatIndex = startIndex - visualProgress
+  const offset = wrapOffset(index, floatIndex, count)
+  const pose = getCardPose(offset, layout)
+  const hide = hideSet.has(index) || Math.abs(offset) < 0.5
+  applyPoseStyle(el, pose, {
+    hide,
+    freezeChrome: true,
+    dist: Math.abs(offset),
+    interactive: false,
+  })
+}
+
+export function applyOverlayPose(el, pose, haloEl) {
+  if (!el) return
+  if (!pose) {
+    applyPoseStyle(el, null, { hide: true })
+    return
+  }
+  applyPoseStyle(el, pose, {
+    hide: false,
+    freezeChrome: true,
+    dist: pose.scale >= 0.98 ? 0 : 1,
+    interactive: false,
+  })
+  el.style.filter = 'none'
+  if (haloEl) {
+    const glow = pose.scale >= 0.98 ? 1 : 0
+    haloEl.style.opacity = String(glow)
+  }
+}
+
+export function neighborFromProgress(startIndex, visualProgress, count) {
+  if (visualProgress > 0) return wrapIndex(startIndex - 1, count)
+  if (visualProgress < 0) return wrapIndex(startIndex + 1, count)
+  return null
 }
